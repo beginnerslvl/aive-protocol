@@ -6,6 +6,8 @@ AIVE is a CVE-like exploit-to-patch loop for AI-operated repositories.
 
 The bet is simple: as coding agents get stronger, the bottleneck shifts from "finding bugs" to proving they are real, estimating blast radius, generating safe patches, running regression checks, and shipping fixes without letting autonomous systems quietly break production.
 
+The threat model is also changing. Rogue AI systems will eventually be able to move autonomously across the internet, probe targets, chain weaknesses, and exploit software faster than human teams can respond. If that becomes normal, defenders need the same level of autonomous reach on the blue-team side: systems that can investigate, reproduce, patch, verify, and harden code before hostile agents arrive.
+
 This repo is a minimal GitHub-first prototype for that idea.
 
 ## Why AIVE
@@ -14,6 +16,7 @@ This repo is a minimal GitHub-first prototype for that idea.
 - Let AI operate inside a constrained maintenance lane.
 - Treat exploit discovery as the start of a patch pipeline, not the final output.
 - Require cross-checking, verification, and comparable patch options before merge.
+- Build an autonomous blue-team loop that can keep pace with autonomous attackers.
 
 ## Core Loop
 
@@ -72,6 +75,20 @@ The intended production shape is:
 
 This repo does not claim to solve autonomous code safety end to end. It gives the project a concrete identity, terminology, and a minimal implementation skeleton that can grow into a full GitHub-native patching protocol.
 
+## Threat Model
+
+The red-team future is not a single human researcher filing a bug report. It is autonomous offensive systems roaming the internet, testing code paths, escalating access, and exploiting weak software supply chains at machine speed.
+
+AIVE is built around the defensive answer to that future:
+
+- blue-team agents that can autonomously inspect repositories and infrastructure boundaries
+- exploit validation before panic or false-positive patching
+- patch generation with multiple candidate fixes
+- independent verifier agents that reproduce and cross-check the result
+- continuous operation so the defense loop never goes idle
+
+The goal is not merely to find vulnerabilities. The goal is to keep secure systems ahead of hostile automation.
+
 ## Example AIVE Record
 
 Example advisory payload: [examples/aive-2026-0001.json](examples/aive-2026-0001.json)
@@ -96,3 +113,5 @@ Each record should represent an issue that has been reproduced, scoped, and pair
 This is not "AI bug-finding."
 
 It is exploit-to-patch infrastructure for the moment when humans can no longer line-by-line review large volumes of agent-generated code, but still need software that compiles, behaves, and ships safely.
+
+In practical terms, that means building autonomous blue-team operations that can move across codebases and internet-facing systems, secure them, verify them, and keep running indefinitely. The north star for AIVE is simple: keep it running for as long as software exists, continuously pushing systems toward a safer state before red-team automation gets there first.
