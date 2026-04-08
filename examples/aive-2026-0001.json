@@ -1,0 +1,15 @@
+{
+  "record_id": "AIVE-2026-0001",
+  "title": "Shell execution with interpolation risk",
+  "repo": "payments-api",
+  "status": "patched",
+  "severity": "high",
+  "blast_radius": "broad",
+  "exploit_hypothesis": "user-controlled branch names reached a shell command in deployment automation",
+  "fix_strategy": "replace shell string construction with explicit argv lists and restrict allowed command targets",
+  "verification": [
+    "failing reproduction captured before patch",
+    "regression suite passed",
+    "independent verifier agent confirmed patch equivalence"
+  ]
+}
