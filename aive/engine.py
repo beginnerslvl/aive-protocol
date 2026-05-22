@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+import os
 import re
 
 from .models import Finding, PatchOption, VerificationCheck
+
+# Files larger than this are skipped by the scanner. Real source rarely exceeds
+# a few megabytes; anything past this cap is almost always a minified bundle,
+# generated blob, or vendored artifact. Line-scanning such files with every
+# rule regex is pure cost, so we stat first and skip before reading — bounding
+# both time and peak memory on pathological inputs.
+MAX_SCAN_FILE_BYTES = 5 * 1024 * 1024
 
 TEXT_SUFFIXES = {
     ".py",
@@ -103,17 +112,31 @@ RULES = [
 ]
 
 
-def iter_source_files(root: Path) -> list[Path]:
-    files: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
+def _walk_pruned(root: Path) -> Iterator[Path]:
+    """Yield every file under ``root``, never descending into ignored trees.
+
+    ``root.rglob('*')`` walks the entire tree first and only then filters out
+    ``.git``/``node_modules``/``.venv``/... — paying full I/O and a ``stat`` for
+    files it always discards. ``os.walk`` lets us prune those directories *in
+    place* so we never enter them, which is decisive on real repositories where
+    vendored trees dwarf the actual source. Pruning is evaluated on directory
+    names within the repo (not on absolute-path segments), so a repo that
+    happens to live under e.g. ``/home/build/...`` scans correctly.
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in IGNORED_PARTS]
+        base = Path(dirpath)
+        for name in filenames:
+            yield base / name
+
+
+def iter_source_files(root: Path) -> Iterator[Path]:
+    for path in _walk_pruned(root):
         if path.suffix.lower() not in TEXT_SUFFIXES:
             continue
-        if any(part in IGNORED_PARTS for part in path.parts):
+        if not path.is_file():
             continue
-        files.append(path)
-    return files
+        yield path
 
 
 def blast_radius_for(path: Path) -> str:
@@ -129,29 +152,50 @@ def scan_repository(root: Path) -> list[Finding]:
     findings: list[Finding] = []
     for path in iter_source_files(root):
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except UnicodeDecodeError:
+            if path.stat().st_size > MAX_SCAN_FILE_BYTES:
+                continue
+        except OSError:
             continue
 
-        for line_number, line in enumerate(lines, start=1):
-            if SUPPRESS_MARKER.search(line):
-                continue
-            for rule in RULES:
-                if not rule["pattern"].search(line):
-                    continue
-                findings.append(
-                    Finding(
-                        rule_id=str(rule["rule_id"]),
-                        title=str(rule["title"]),
-                        file_path=path.relative_to(root).as_posix(),
-                        line=line_number,
-                        severity=str(rule["severity"]),
-                        confidence=float(rule["confidence"]),
-                        snippet=line.strip()[:180],
-                        blast_radius=blast_radius_for(path.relative_to(root)),
-                        exploit_hypothesis=str(rule["hypothesis"]),
-                    )
-                )
+        # Hoist the per-file relative path and blast radius out of the hot loop:
+        # the original recomputed ``relative_to`` twice *per finding*. Compute
+        # them once per file instead.
+        relative = path.relative_to(root)
+        rel_posix = relative.as_posix()
+        blast_radius = blast_radius_for(relative)
+
+        # Stream the file line by line so peak memory stays bounded by a single
+        # line regardless of file size (the old code loaded the whole file and
+        # built a full list of its lines up front). Findings are buffered
+        # per-file so that a mid-file decode error discards the whole file,
+        # preserving the original "skip undecodable files" semantics.
+        file_findings: list[Finding] = []
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line_number, raw in enumerate(handle, start=1):
+                    line = raw.rstrip("\n")
+                    if SUPPRESS_MARKER.search(line):
+                        continue
+                    for rule in RULES:
+                        if not rule["pattern"].search(line):
+                            continue
+                        file_findings.append(
+                            Finding(
+                                rule_id=str(rule["rule_id"]),
+                                title=str(rule["title"]),
+                                file_path=rel_posix,
+                                line=line_number,
+                                severity=str(rule["severity"]),
+                                confidence=float(rule["confidence"]),
+                                snippet=line.strip()[:180],
+                                blast_radius=blast_radius,
+                                exploit_hypothesis=str(rule["hypothesis"]),
+                            )
+                        )
+        except (UnicodeDecodeError, OSError):
+            continue
+
+        findings.extend(file_findings)
     return findings
 
 
@@ -345,7 +389,10 @@ def run_verification(root: Path) -> list[VerificationCheck]:
             )
         )
 
-    has_tests = any(root.rglob("test_*.py")) or (root / "tests").exists()
+    has_tests = (root / "tests").exists() or any(
+        path.name.startswith("test_") and path.suffix == ".py"
+        for path in _walk_pruned(root)
+    )
     checks.append(
         VerificationCheck(
             name="test-coverage-signal",

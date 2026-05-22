@@ -6,8 +6,10 @@ import unittest
 
 from aive.cli import main as cli_main
 from aive.engine import (
+    MAX_SCAN_FILE_BYTES,
     build_patch_plan_markdown,
     build_scan_payload,
+    iter_source_files,
     run_verification,
     scan_repository,
 )
@@ -75,6 +77,47 @@ class ScanTests(unittest.TestCase):
             payload = build_scan_payload(root)
         severities = [f["severity"] for f in payload["findings"]]
         self.assertEqual(severities[0], "high")
+
+
+class TraversalTests(unittest.TestCase):
+    def test_ignored_directories_are_not_descended(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _write(root, "app.py", "value = eval(user_input)\n")  # aive: ignore
+            for ignored in ("node_modules", ".git", ".venv"):
+                sub = root / ignored / "nested"
+                sub.mkdir(parents=True)
+                (sub / "vendored.py").write_text(
+                    "os.system(cmd)\n", encoding="utf-8"  # aive: ignore
+                )
+            sources = {p.name for p in iter_source_files(root)}
+            findings = scan_repository(root)
+        # Only the real source file is visited; vendored trees are pruned.
+        self.assertEqual(sources, {"app.py"})
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].file_path, "app.py")
+
+    def test_repo_under_ignored_named_path_still_scans(self) -> None:
+        # A repo living inside a directory named like an ignored part (e.g.
+        # ".../build/proj") must still be scanned; pruning is per-repo, not on
+        # absolute-path segments.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "build" / "proj"
+            root.mkdir(parents=True)
+            _write(root, "app.py", "os.system(cmd)\n")  # aive: ignore
+            findings = scan_repository(root)
+        self.assertEqual(len(findings), 1)
+
+    def test_oversized_files_are_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            big = "# padding\n" * ((MAX_SCAN_FILE_BYTES // 10) + 1)
+            _write(root, "huge.py", "value = eval(x)\n" + big)  # aive: ignore
+            _write(root, "small.py", "value = eval(y)\n")  # aive: ignore
+            findings = scan_repository(root)
+        files = {f.file_path for f in findings}
+        self.assertIn("small.py", files)
+        self.assertNotIn("huge.py", files)
 
 
 class PatchPlanTests(unittest.TestCase):
