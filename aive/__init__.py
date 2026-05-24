@@ -1,7 +1,22 @@
-from .engine import build_patch_plan_markdown, build_scan_payload, run_verification
+from .engine import (
+    RULES,
+    build_patch_plan_markdown,
+    build_scan_payload,
+    patch_options_for,
+    run_verification,
+    scan_repository,
+    summarize_severity,
+)
+
+__version__ = "0.2.0"
 
 __all__ = [
+    "RULES",
     "build_patch_plan_markdown",
     "build_scan_payload",
+    "patch_options_for",
     "run_verification",
+    "scan_repository",
+    "summarize_severity",
+    "__version__",
 ]

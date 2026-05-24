@@ -28,11 +28,18 @@ IGNORED_PARTS = {
     "build",
 }
 
+SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+# A line carrying this marker is deliberately skipped by the scanner. It lets a
+# maintainer annotate an intentional pattern (a rule definition, a test fixture,
+# a reviewed false positive) so the loop does not re-flag it every run.
+SUPPRESS_MARKER = re.compile(r"#\s*aive:\s*ignore\b")
+
 RULES = [
     {
         "rule_id": "AIVE-PY-001",
         "title": "Dynamic code execution",
-        "pattern": re.compile(r"\b(?:eval|exec)\s*\("),
+        "pattern": re.compile(r"\b(?:eval|exec)\s*\("),  # aive: ignore
         "severity": "high",
         "confidence": 0.92,
         "hypothesis": "attacker-controlled input may reach a dynamic execution sink",
@@ -40,18 +47,58 @@ RULES = [
     {
         "rule_id": "AIVE-PY-002",
         "title": "Shell execution with interpolation risk",
-        "pattern": re.compile(r"subprocess\.[a-z_]+\([^)]*shell\s*=\s*True"),
+        "pattern": re.compile(r"subprocess\.[a-z_]+\([^)]*shell\s*=\s*True"),  # aive: ignore
         "severity": "high",
         "confidence": 0.88,
         "hypothesis": "string interpolation into a shell command may allow command injection",
     },
     {
+        "rule_id": "AIVE-PY-003",
+        "title": "Direct OS command execution",
+        "pattern": re.compile(r"\bos\.(?:system|popen)\s*\("),  # aive: ignore
+        "severity": "high",
+        "confidence": 0.83,
+        "hypothesis": "a raw OS command call can be steered by unsanitised input",
+    },
+    {
+        "rule_id": "AIVE-PY-004",
+        "title": "Unsafe deserialization",
+        "pattern": re.compile(r"\b(?:pickle|cPickle)\.loads?\s*\("),  # aive: ignore
+        "severity": "high",
+        "confidence": 0.8,
+        "hypothesis": "deserializing untrusted data can execute arbitrary objects on load",
+    },
+    {
+        "rule_id": "AIVE-PY-005",
+        "title": "Unsafe YAML load",
+        "pattern": re.compile(r"yaml\.load\s*\((?![^)]*Safe)"),  # aive: ignore
+        "severity": "medium",
+        "confidence": 0.74,
+        "hypothesis": "yaml.load without a safe loader can instantiate arbitrary types",
+    },
+    {
         "rule_id": "AIVE-SEC-001",
         "title": "Hard-coded credential marker",
-        "pattern": re.compile(r"(api[_-]?key|secret|token)\s*=\s*[\"'][^\"']+[\"']"),
+        "pattern": re.compile(r"(api[_-]?key|secret|token|password)\s*=\s*[\"'][^\"']+[\"']"),  # aive: ignore
         "severity": "medium",
         "confidence": 0.76,
         "hypothesis": "embedded credentials widen blast radius and complicate patch hygiene",
+    },
+    {
+        "rule_id": "AIVE-SEC-002",
+        "title": "TLS verification disabled",
+        "pattern": re.compile(r"verify\s*=\s*False"),  # aive: ignore
+        "severity": "medium",
+        "confidence": 0.7,
+        "hypothesis": "disabling certificate verification exposes traffic to interception",
+    },
+    {
+        "rule_id": "AIVE-SEC-003",
+        "title": "Weak hashing primitive",
+        "pattern": re.compile(r"hashlib\.(?:md5|sha1)\s*\("),  # aive: ignore
+        "severity": "low",
+        "confidence": 0.55,
+        "hypothesis": "md5/sha1 are unsuitable for security-sensitive hashing",
     },
 ]
 
@@ -87,6 +134,8 @@ def scan_repository(root: Path) -> list[Finding]:
             continue
 
         for line_number, line in enumerate(lines, start=1):
+            if SUPPRESS_MARKER.search(line):
+                continue
             for rule in RULES:
                 if not rule["pattern"].search(line):
                     continue
@@ -106,51 +155,100 @@ def scan_repository(root: Path) -> list[Finding]:
     return findings
 
 
-def build_scan_payload(root: Path) -> dict[str, object]:
-    findings = scan_repository(root)
+def summarize_severity(findings: list[Finding]) -> dict[str, int]:
+    counts = {"high": 0, "medium": 0, "low": 0}
+    for finding in findings:
+        counts[finding.severity] = counts.get(finding.severity, 0) + 1
+    return counts
+
+
+def build_scan_payload(root: Path, min_confidence: float = 0.0) -> dict[str, object]:
+    findings = [
+        finding
+        for finding in scan_repository(root)
+        if finding.confidence >= min_confidence
+    ]
+    findings.sort(
+        key=lambda f: (-SEVERITY_ORDER.get(f.severity, 0), -f.confidence, f.file_path, f.line)
+    )
     return {
         "schema": "aive.scan.v1",
         "repo": root.resolve().name,
         "scanned_at": datetime.now(UTC).isoformat(),
         "finding_count": len(findings),
+        "severity_summary": summarize_severity(findings),
         "findings": [finding.to_dict() for finding in findings],
     }
 
 
+COMMON_PATCH_OPTIONS = [
+    PatchOption(
+        title="Reproduce the exploit path",
+        summary="Write the smallest failing test or proof that confirms the issue is real before changing behavior.",
+        safety_notes=["Avoid patching from pattern match alone.", "Preserve a replay artifact for verifier agents."],
+    ),
+    PatchOption(
+        title="Ship behind a narrow branch",
+        summary="Apply the fix in an isolated branch and require independent verification before merge.",
+        safety_notes=["Do not patch directly on main.", "Attach regression results to the PR body."],
+    ),
+]
+
+# Rule-specific first-choice remediation. Keeping this as a registry means a new
+# detection rule and its preferred fix stay side by side and easy to extend.
+SPECIFIC_PATCH_OPTIONS: dict[str, PatchOption] = {
+    "AIVE-PY-001": PatchOption(
+        title="Replace dynamic execution with an allowlisted dispatcher",
+        summary="Map supported actions to explicit callables instead of evaluating raw expressions or code strings.",
+        safety_notes=["Reject unknown actions.", "Record rejected inputs for follow-up triage."],
+    ),
+    "AIVE-PY-002": PatchOption(
+        title="Remove shell parsing and pass argv explicitly",
+        summary="Construct the command as a list and keep shell interpretation disabled.",
+        safety_notes=["Validate user-controlled fragments.", "Prefer stable command templates."],
+    ),
+    "AIVE-PY-003": PatchOption(
+        title="Swap os.system for subprocess.run with an argv list",
+        summary="Call subprocess.run([...], shell=False) so arguments are never re-parsed by a shell.",
+        safety_notes=["Never interpolate user input into the command string.", "Fail closed on unexpected arguments."],
+    ),
+    "AIVE-PY-004": PatchOption(
+        title="Replace pickle with a schema-checked format",
+        summary="Deserialize untrusted data with JSON or a validated schema rather than pickle.",
+        safety_notes=["Only unpickle data you produced yourself.", "Add a signature or integrity check if pickle is unavoidable."],
+    ),
+    "AIVE-PY-005": PatchOption(
+        title="Load YAML through yaml.safe_load",
+        summary="Use yaml.safe_load (or SafeLoader) so only plain data types are constructed.",
+        safety_notes=["Reserve full YAML tags for trusted internal config only.", "Validate the parsed structure before use."],
+    ),
+    "AIVE-SEC-001": PatchOption(
+        title="Move secrets into a managed store",
+        summary="Replace inline credentials with environment-backed or secret-manager-backed retrieval.",
+        safety_notes=["Rotate any exposed material.", "Search history and CI logs for leakage."],
+    ),
+    "AIVE-SEC-002": PatchOption(
+        title="Re-enable certificate verification",
+        summary="Remove verify=False and trust the system CA bundle, or pin an explicit CA path.",  # aive: ignore
+        safety_notes=["Never ship verify=False to production.", "Fix the root cause (expired or self-signed cert) instead."],  # aive: ignore
+    ),
+    "AIVE-SEC-003": PatchOption(
+        title="Upgrade to a modern hashing primitive",
+        summary="Use SHA-256+ for integrity and a slow KDF (bcrypt/argon2/scrypt) for passwords.",
+        safety_notes=["Keep md5/sha1 only for non-security checksums.", "Migrate stored hashes on next authentication."],
+    ),
+}
+
+
 def patch_options_for(finding: Finding) -> list[PatchOption]:
-    common = [
-        PatchOption(
-            title="Reproduce the exploit path",
-            summary="Write the smallest failing test or proof that confirms the issue is real before changing behavior.",
-            safety_notes=["Avoid patching from pattern match alone.", "Preserve a replay artifact for verifier agents."],
-        ),
-        PatchOption(
-            title="Ship behind a narrow branch",
-            summary="Apply the fix in an isolated branch and require independent verification before merge.",
-            safety_notes=["Do not patch directly on main.", "Attach regression results to the PR body."],
-        ),
-    ]
-
-    if finding.rule_id == "AIVE-PY-001":
+    specific = SPECIFIC_PATCH_OPTIONS.get(finding.rule_id)
+    if specific is None:
         specific = PatchOption(
-            title="Replace dynamic execution with an allowlisted dispatcher",
-            summary="Map supported actions to explicit callables instead of evaluating raw expressions or code strings.",
-            safety_notes=["Reject unknown actions.", "Record rejected inputs for follow-up triage."],
+            title="Contain and verify the pattern",
+            summary="Scope the risky call, add a reproduction, and gate the fix behind independent verification.",
+            safety_notes=["Confirm reachability before patching.", "Prefer the least-surprising safe default."],
         )
-    elif finding.rule_id == "AIVE-PY-002":
-        specific = PatchOption(
-            title="Remove shell parsing and pass argv explicitly",
-            summary="Construct the command as a list and keep shell interpretation disabled.",
-            safety_notes=["Validate user-controlled fragments.", "Prefer stable command templates."],
-        )
-    else:
-        specific = PatchOption(
-            title="Move secrets into a managed store",
-            summary="Replace inline credentials with environment-backed or secret-manager-backed retrieval.",
-            safety_notes=["Rotate any exposed material.", "Search history and CI logs for leakage."],
-        )
-
-    return [specific, *common]
+    return [specific, *COMMON_PATCH_OPTIONS]
 
 
 def build_patch_plan_markdown(payload: dict[str, object]) -> str:
