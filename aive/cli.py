@@ -32,6 +32,7 @@ from .engine import (
     build_scan_payload,
     run_verification,
 )
+from .render import FORMAT_CHOICES, render_scan
 
 SEVERITY_CHOICES = ("low", "medium", "high")
 
@@ -101,7 +102,7 @@ def _run_scan(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
     payload = build_scan_payload(target, min_confidence=args.min_confidence)
-    code = _write_or_print(json.dumps(payload, indent=2), args.output)
+    code = _write_or_print(render_scan(payload, args.format), args.output)
     if code != EXIT_OK:
         return code
 
@@ -192,7 +193,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     scan = sub.add_parser("scan", help="Scan a repository and emit a findings payload.")
     scan.add_argument("target", nargs="?", default=".", help="Repository path to scan.")
-    scan.add_argument("--output", help="Optional file to write JSON payload to.")
+    scan.add_argument("--output", help="Optional file to write the rendered payload to.")
+    scan.add_argument(
+        "--format",
+        choices=FORMAT_CHOICES,
+        default="json",
+        help="Output variant: json (machine, default), plain (verbose report), compact (one line per finding).",
+    )
     scan.add_argument(
         "--min-confidence",
         type=_confidence,

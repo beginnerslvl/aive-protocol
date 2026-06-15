@@ -110,6 +110,30 @@ aive scan . --min-confidence 0.8
 
 > Prefer plain scripts? The originals still live in `scripts/` (`scan_repo.py`, `patch_plan.py`, `verify_repo.py`) — that's what the CI workflow calls, so it needs no install step.
 
+### Choosing an output format
+
+`aive scan` speaks JSON by default (best for pipelines and `aive plan`), but two human-facing variants are one flag away with `--format`:
+
+| `--format` | Shape | Use it for |
+| --- | --- | --- |
+| `json` *(default)* | The canonical `aive.scan.v1` payload — byte-for-byte unchanged. | Piping into `aive plan`, CI, tooling. |
+| `compact` | One dense line per finding: `[SEV] rule  file:line  c=conf  title`. | Fast triage, `grep`/`awk`, PR comments. |
+| `plain` | A verbose report grouped by severity with location, confidence, blast radius, hypothesis, and snippet. | Reading a scan by eye in a terminal. |
+
+```bash
+aive scan .                     # machine JSON (default, unchanged)
+aive scan . --format compact    # one line per finding
+aive scan . --format plain      # grouped, human-readable report
+```
+
+The format only reshapes the display — `--min-confidence`, `--fail-on`, and `--output` all compose with every variant, so `aive scan . --format compact --fail-on high` stays a valid merge gate.
+
+```text
+$ aive scan . --format compact --min-confidence 0.8
+[HIGH] AIVE-PY-001 deploy.py:7                       c=0.92  Dynamic code execution
+[HIGH] AIVE-PY-003 deploy.py:9                       c=0.83  Direct OS command execution
+```
+
 ### Suppressing a reviewed false positive
 
 Sometimes a pattern is intentional (a rule definition, a test fixture, a checksum that isn't security-sensitive). Tag the line and AIVE will leave it be:
@@ -175,6 +199,7 @@ Adding a rule is a two-line affair: drop a pattern into `RULES` in `aive/engine.
 │   ├── __init__.py
 │   ├── cli.py        # the `aive` command (scan / plan / verify)
 │   ├── engine.py     # rules, scanning, patch planning, verification
+│   ├── render.py     # scan output variants (json / plain / compact)
 │   └── models.py     # Finding / PatchOption / VerificationCheck dataclasses
 ├── docs/
 │   └── sample-patch-plan.md
