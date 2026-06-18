@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aive-protocol"
-version = "0.1.0"
+version = "0.2.0"
 description = "AIVE: AI-Validated Exploit exploit-to-patch automation for GitHub repositories"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
-  { name = "beginnerslvl" }
+  { name = "Waleed Ajmal" }
 ]
 keywords = ["ai", "security", "github", "patching", "automation"]
 classifiers = [
@@ -19,9 +19,16 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Topic :: Security",
   "Topic :: Software Development :: Quality Assurance"
 ]
+
+[project.scripts]
+aive = "aive.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
 
 [tool.setuptools]
 packages = ["aive"]
