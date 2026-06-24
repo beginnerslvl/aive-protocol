@@ -32,7 +32,9 @@ def test_build_parser_registers_all_subcommands() -> None:
     parser = build_parser()
     # argparse stores choices for the subparser action.
     sub = next(a for a in parser._actions if getattr(a, "choices", None) and "scan" in a.choices)
-    assert set(sub.choices) == {"scan", "plan", "verify"}
+    # The core loop stages are always present; optional UX subcommands (e.g. the
+    # rich `tui`) and later feature additions register alongside them.
+    assert {"scan", "plan", "verify"}.issubset(set(sub.choices))
 
 
 # --------------------------------------------------------------------------- #

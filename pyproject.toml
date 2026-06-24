@@ -29,6 +29,9 @@ aive = "aive.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# Optional rich terminal UI: enables `aive tui`, `--pretty`, colour tables,
+# spinners and progress bars. The core toolkit stays zero-dependency without it.
+ui = ["rich>=13"]
 
 [tool.setuptools]
 packages = ["aive"]

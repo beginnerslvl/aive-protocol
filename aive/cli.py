@@ -2,9 +2,10 @@
 
 Exposes the three loop stages behind one command:
 
-    aive scan   <path> [--output F] [--min-confidence X] [--fail-on SEV]
+    aive scan   <path> [--output F] [--min-confidence X] [--fail-on SEV] [--pretty]
     aive plan   <findings.json> [--output F]
-    aive verify <path> [--json] [--strict]
+    aive verify <path> [--json] [--strict] [--pretty]
+    aive tui    [path]                         # interactive rich TUI
 
 The standalone scripts in ``scripts/`` remain for the GitHub Actions workflow;
 this module is what ``pip install`` wires up as the ``aive`` console command.
@@ -14,6 +15,10 @@ cleanly when stdout is piped or redirected, honours ``NO_COLOR`` /
 ``FORCE_COLOR`` / ``--no-color``, survives a closed pipe (``| head``) and
 Ctrl-C without dumping a traceback, and turns filesystem and JSON problems into
 short, actionable error messages on stderr instead of stack traces.
+
+``--pretty`` and ``tui`` render through :mod:`aive.ui` (rich, an optional
+extra). Default output is unchanged — plain JSON / text — so pipelines and CI
+gating keep working with zero third-party dependencies.
 """
 from __future__ import annotations
 
@@ -24,7 +29,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import __version__
+from . import __version__, ui
 from ._terminal import Palette, should_use_color
 from .engine import (
     SEVERITY_ORDER,
@@ -101,10 +106,19 @@ def _run_scan(args: argparse.Namespace) -> int:
     if target is None:
         return EXIT_ERROR
 
-    payload = build_scan_payload(target, min_confidence=args.min_confidence)
-    code = _write_or_print(render_scan(payload, args.format), args.output)
-    if code != EXIT_OK:
-        return code
+    if getattr(args, "pretty", False):
+        console = ui.get_console()
+        payload = ui.scan_with_progress(console, target, args.min_confidence, build_scan_payload)
+        ui.render_scan_payload(console, payload)
+        if args.output:
+            code = _write_or_print(render_scan(payload, args.format), args.output)
+            if code != EXIT_OK:
+                return code
+    else:
+        payload = build_scan_payload(target, min_confidence=args.min_confidence)
+        code = _write_or_print(render_scan(payload, args.format), args.output)
+        if code != EXIT_OK:
+            return code
 
     if args.fail_on:
         threshold = SEVERITY_ORDER[args.fail_on]
@@ -173,12 +187,23 @@ def _run_verify(args: argparse.Namespace) -> int:
     checks = run_verification(target)
     if args.json:
         print(json.dumps([check.to_dict() for check in checks], indent=2))
+    elif getattr(args, "pretty", False):
+        ui.render_verification(ui.get_console(), [check.to_dict() for check in checks])
     else:
         palette = Palette(should_use_color(sys.stdout, no_color=args.no_color))
         for check in checks:
             print(f"- {check.name}: {palette.status(check.status)} ({check.details})")
     failed = any(check.status == "fail" for check in checks)
     return EXIT_POLICY if args.strict and failed else EXIT_OK
+
+
+def _run_tui(args: argparse.Namespace) -> int:
+    return ui.run_interactive_menu(
+        default_target=args.target,
+        scan_builder=build_scan_payload,
+        verifier=run_verification,
+        plan_builder=build_patch_plan_markdown,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -208,6 +233,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Drop findings below this confidence (0.0-1.0).",
     )
     scan.add_argument("--fail-on", choices=SEVERITY_CHOICES, help="Exit non-zero at this severity or higher.")
+    scan.add_argument("--pretty", action="store_true", help="Render a coloured table + progress bar instead of JSON.")
     scan.set_defaults(func=_run_scan)
 
     plan = sub.add_parser("plan", help="Render a patch plan from a findings payload.")
@@ -219,7 +245,12 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("target", nargs="?", default=".", help="Repository path to verify.")
     verify.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
     verify.add_argument("--strict", action="store_true", help="Exit non-zero when any check fails.")
+    verify.add_argument("--pretty", action="store_true", help="Render a coloured status table instead of plain text.")
     verify.set_defaults(func=_run_verify)
+
+    tui = sub.add_parser("tui", help="Launch the interactive terminal UI (menu, tables, spinners).")
+    tui.add_argument("target", nargs="?", default=".", help="Default repository path for the session.")
+    tui.set_defaults(func=_run_tui)
 
     return parser
 

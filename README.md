@@ -134,6 +134,26 @@ $ aive scan . --format compact --min-confidence 0.8
 [HIGH] AIVE-PY-003 deploy.py:9                       c=0.83  Direct OS command execution
 ```
 
+### A prettier terminal (optional)
+
+The core commands stay plain-text and machine-friendly by default. For humans at
+the keyboard there's an optional [`rich`](https://github.com/Textualize/rich)
+front-end — colour-graded severity tables, confidence meters, a scan progress
+bar, and a full interactive menu:
+
+```bash
+pip install -e ".[ui]"     # pulls in rich (still optional; core stays zero-dep)
+
+aive scan .   --pretty      # coloured findings table + live progress bar
+aive verify . --pretty      # green/amber/red status board
+aive tui                    # interactive menu: scan, verify, plan, quit
+```
+
+If `rich` isn't installed, `--pretty` and `aive tui` quietly fall back to plain
+output — nothing breaks, you just lose the paint. JSON output (`aive scan .`,
+`--output`, `--json`) is never colourised, so pipelines and CI gating are
+unaffected.
+
 ### Suppressing a reviewed false positive
 
 Sometimes a pattern is intentional (a rule definition, a test fixture, a checksum that isn't security-sensitive). Tag the line and AIVE will leave it be:
