@@ -75,7 +75,7 @@ aive --version
 
 ## Using it
 
-AIVE ships one friendly command with three subcommands. Point it at any repo.
+AIVE ships one friendly command with four subcommands (`scan`, `plan`, `verify`, `diff`). Point it at any repo.
 
 **Scan a repo and print JSON findings:**
 
@@ -154,6 +154,35 @@ output — nothing breaks, you just lose the paint. JSON output (`aive scan .`,
 `--output`, `--json`) is never colourised, so pipelines and CI gating are
 unaffected.
 
+### Gate a pull request on *new* risk only
+
+`--fail-on high` is a blunt instrument: it blocks a PR whenever any high-severity pattern exists anywhere in the repo, including debt that predates the change. That trains reviewers to override the gate. `aive diff` fixes this by comparing the working tree against a **baseline** — typically the last known-good scan of `main` — and blocking only when the change in front of you *introduces* something new.
+
+```bash
+# 1. Record a baseline once (e.g. on main, cached in CI).
+aive scan . --output baseline.json
+
+# 2. On every PR, re-scan and compare. Exit non-zero only if the PR adds risk.
+aive diff . --baseline baseline.json --fail-on-new
+
+# Human-readable drift report for the PR body:
+aive diff . --baseline baseline.json --markdown --output drift.md
+```
+
+Findings are matched by a **line-agnostic fingerprint** (`rule_id` + file + whitespace-normalized snippet), so moving a function, adding an import, or reindenting a block does not masquerade as a regression — only genuinely new occurrences count. The diff sorts findings into three buckets: **new** (regressions the PR added), **fixed** (progress), and **unchanged** (existing debt). Already have two saved scans? Skip the rescan with `--current current.json`.
+
+The JSON report uses the `aive.diff.v1` schema:
+
+```json
+{
+  "schema": "aive.diff.v1",
+  "repo": "demo",
+  "summary": { "new": 1, "fixed": 0, "unchanged": 4, "baseline_total": 4, "current_total": 5 },
+  "new": [ { "rule_id": "AIVE-PY-003", "file_path": "deploy.py", "line": 12, "severity": "high" } ],
+  "fixed": [],
+  "unchanged": [ /* ... */ ]
+}
+```
 ### Suppressing a reviewed false positive
 
 Sometimes a pattern is intentional (a rule definition, a test fixture, a checksum that isn't security-sensitive). Tag the line and AIVE will leave it be:
@@ -217,10 +246,8 @@ Adding a rule is a two-line affair: drop a pattern into `RULES` in `aive/engine.
 ├── .github/workflows/aive-dry-run.yml   # scheduled/manual dry-run in CI
 ├── aive/
 │   ├── __init__.py
-│   ├── cli.py        # the `aive` command (scan / plan / verify)
+│   ├── cli.py        # the `aive` command (scan / plan / verify / diff)
 │   ├── engine.py     # rules, scanning, patch planning, verification
-│   ├── render.py     # scan output variants (json / plain / compact)
-│   └── models.py     # Finding / PatchOption / VerificationCheck dataclasses
 ├── docs/
 │   └── sample-patch-plan.md
 ├── examples/
