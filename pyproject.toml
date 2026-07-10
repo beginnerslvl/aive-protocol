@@ -12,26 +12,56 @@ license = { text = "MIT" }
 authors = [
   { name = "Waleed Ajmal" }
 ]
-keywords = ["ai", "security", "github", "patching", "automation"]
+maintainers = [
+  { name = "Waleed Ajmal" }
+]
+keywords = [
+  "ai",
+  "security",
+  "sast",
+  "static-analysis",
+  "vulnerability-scanner",
+  "github",
+  "patching",
+  "automation",
+  "devsecops",
+  "cli",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
+  "Environment :: Console",
   "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
   "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Security",
-  "Topic :: Software Development :: Quality Assurance"
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Software Development :: Testing",
+  "Typing :: Typed",
 ]
+
+[project.urls]
+Homepage = "https://github.com/waleedsworld/aive-protocol"
+Repository = "https://github.com/waleedsworld/aive-protocol"
+Documentation = "https://github.com/waleedsworld/aive-protocol#readme"
+Issues = "https://github.com/waleedsworld/aive-protocol/issues"
+Changelog = "https://github.com/waleedsworld/aive-protocol/blob/main/CHANGELOG.md"
 
 [project.scripts]
 aive = "aive.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "build>=1.0"]
 # Optional rich terminal UI: enables `aive tui`, `--pretty`, colour tables,
 # spinners and progress bars. The core toolkit stays zero-dependency without it.
 ui = ["rich>=13"]
 
 [tool.setuptools]
 packages = ["aive"]
+
+[tool.setuptools.package-data]
+aive = ["py.typed"]

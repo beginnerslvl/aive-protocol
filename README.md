@@ -1,5 +1,12 @@
 # AIVE — AI-Validated Exploit
 
+[![CI](https://github.com/waleedsworld/aive-protocol/actions/workflows/aive-dry-run.yml/badge.svg)](https://github.com/waleedsworld/aive-protocol/actions/workflows/aive-dry-run.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![Zero dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](pyproject.toml)
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#roadmap)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
 **An exploit-to-patch loop for repositories that are increasingly run by AI, for AI, and against AI.**
 
 AIVE is a small, GitHub-first prototype with a big thesis: as coding agents get stronger, "finding bugs" stops being the hard part. The hard part becomes *proving a bug is real, estimating how far it can spread, drafting safe patches, verifying them, and shipping the fix* — all without letting an autonomous system quietly break production while you were at lunch.
@@ -7,6 +14,34 @@ AIVE is a small, GitHub-first prototype with a big thesis: as coding agents get 
 The threat model is shifting too. The red team of the future isn't one human filing a bug report; it's offensive automation roaming the internet, chaining weaknesses at machine speed. If that becomes normal, the blue team needs the same reach: systems that can investigate, reproduce, patch, verify, and harden code *before* hostile agents show up. AIVE is a minimal skeleton for that blue-team loop — think of it as a tiny, opinionated CVE pipeline you can run on your own repo before breakfast.
 
 > **TL;DR** — point it at a repo, it flags risky patterns, drafts an exploit-to-patch plan for each one, and runs verification checks. No servers, no accounts, no telemetry. Just Python and good intentions.
+
+---
+
+## Install in one line
+
+The fastest path is [`pipx`](https://pipx.pypa.io) — it drops the `aive` command on your PATH in its own isolated environment, no venv juggling:
+
+```bash
+pipx install git+https://github.com/waleedsworld/aive-protocol.git
+```
+
+No pipx? Plain `pip` works too:
+
+```bash
+pip install git+https://github.com/waleedsworld/aive-protocol.git
+```
+
+Either way you get the `aive` command. Confirm it:
+
+```bash
+aive --version   # -> aive 0.2.0
+```
+
+Want to hack on the rules instead? Jump to [Quick start](#quick-start-beginner-friendly-nothing-assumed) for the editable-install workflow.
+
+> **Maintainers:** a ready-to-tap Homebrew formula template lives at
+> [`packaging/homebrew/aive.rb`](packaging/homebrew/aive.rb) — fill in the release
+> tarball checksum after cutting a tag to offer `brew install`.
 
 ---
 
