@@ -15,6 +15,35 @@ The threat model is shifting too. The red team of the future isn't one human fil
 
 > **TL;DR** — point it at a repo, it flags risky patterns, drafts an exploit-to-patch plan for each one, and runs verification checks. No servers, no accounts, no telemetry. Just Python and good intentions.
 
+<p align="center">
+  <img src="docs/media/demo.gif" alt="AIVE scanning a vulnerable repo, drafting a patch plan, diffing against a baseline, and verifying — all from the terminal" width="100%">
+</p>
+
+<p align="center">
+  <em>One command. Scan → paint → plan → gate-on-new-risk → verify.</em><br>
+  <strong>Live demo:</strong> deploying soon.
+</p>
+
+---
+
+## What's new in 0.2 — the loop grew teeth
+
+AIVE started as a scanner with a thesis. This release turns it into a workflow you'd actually wire into CI:
+
+| ✦ New | What you get |
+| --- | --- |
+| **`aive diff` — baseline drift gating** | Block a PR only when it introduces *new* risk, not for debt it inherited. Findings match on a line-agnostic fingerprint, so refactors don't cry wolf. |
+| **Rich terminal UI (`--pretty`, `aive tui`)** | Colour-graded severity tables, confidence meters, a live scan progress bar, and a full interactive menu — all opt-in, zero-dep core untouched. |
+| **Output variants (`--format plain\|compact\|json`)** | JSON for machines, `compact` for `grep`-fast triage, `plain` for reading a scan by eye. Every flag composes with the gate. |
+| **Bomb-proof CLI** | Clean errors instead of tracebacks, `NO_COLOR` / `--no-color`, survives `| head` and Ctrl-C, validates paths and confidence bounds. |
+| **A real test suite + CI** | 120+ tests across engine, CLI, and an end-to-end pipeline, wired to GitHub Actions. |
+| **Faster, safer scans** | Ignored trees pruned, oversized files guarded, findings streamed. |
+| **Packaging & docs** | One-line `pipx` install, PyPI/Homebrew metadata, `py.typed`, CHANGELOG + CONTRIBUTING. |
+
+<p align="center">
+  <img src="docs/media/screenshot-pretty-scan.png" alt="aive scan --pretty rendering a colour-graded severity table with confidence meters" width="90%">
+</p>
+
 ---
 
 ## Install in one line
@@ -189,6 +218,10 @@ output — nothing breaks, you just lose the paint. JSON output (`aive scan .`,
 `--output`, `--json`) is never colourised, so pipelines and CI gating are
 unaffected.
 
+<p align="center">
+  <img src="docs/media/screenshot-verify.png" alt="aive verify --pretty showing a green status board with all checks passing, alongside a baseline drift report" width="90%">
+</p>
+
 ### Gate a pull request on *new* risk only
 
 `--fail-on high` is a blunt instrument: it blocks a PR whenever any high-severity pattern exists anywhere in the repo, including debt that predates the change. That trains reviewers to override the gate. `aive diff` fixes this by comparing the working tree against a **baseline** — typically the last known-good scan of `main` — and blocking only when the change in front of you *introduces* something new.
@@ -278,17 +311,27 @@ Adding a rule is a two-line affair: drop a pattern into `RULES` in `aive/engine.
 
 ```text
 .
-├── .github/workflows/aive-dry-run.yml   # scheduled/manual dry-run in CI
+├── .github/workflows/
+│   ├── aive-dry-run.yml   # scheduled/manual scan dry-run
+│   └── ci.yml             # pytest matrix on every push
 ├── aive/
-│   ├── __init__.py
-│   ├── cli.py        # the `aive` command (scan / plan / verify / diff)
+│   ├── cli.py        # the `aive` command (scan / plan / verify / diff / tui)
 │   ├── engine.py     # rules, scanning, patch planning, verification
+│   ├── diff.py       # baseline drift detection (new / fixed / unchanged)
+│   ├── render.py     # scan output variants (json / plain / compact)
+│   ├── ui.py         # optional rich TUI, tables, progress bars
+│   ├── _terminal.py  # colour/TTY handling for the plain CLI
+│   └── __main__.py   # `python -m aive`
 ├── docs/
+│   ├── media/        # demo.gif + screenshots
 │   └── sample-patch-plan.md
 ├── examples/
 │   └── aive-2026-0001.json   # what a finished advisory record looks like
+├── packaging/homebrew/aive.rb
 ├── scripts/          # standalone entry points (used by CI)
-├── tests/
+├── tests/            # pytest suite
+├── CHANGELOG.md
+├── CONTRIBUTING.md
 ├── LICENSE
 ├── pyproject.toml
 └── README.md
@@ -298,13 +341,14 @@ Adding a rule is a two-line affair: drop a pattern into `RULES` in `aive/engine.
 
 ## Running the tests
 
-No extra dependencies required — it's all `unittest`:
+The suite runs on `pytest`. Grab the dev extra and go:
 
 ```bash
-python -m unittest discover -s tests
+pip install -e ".[dev]"
+pytest -q          # 120+ tests: engine, CLI, diff, render, UI, e2e pipeline
 ```
 
-(Or `pip install -e ".[dev]"` and `pytest` if that's your jam.)
+The same suite runs on every push via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ---
 
