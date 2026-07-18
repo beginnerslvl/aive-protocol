@@ -1,117 +1,229 @@
-# AIVE
+# AIVE — AI-Validated Exploit
 
-**AI-Validated Exploit**
+**An exploit-to-patch loop for repositories that are increasingly run by AI, for AI, and against AI.**
 
-AIVE is a CVE-like exploit-to-patch loop for AI-operated repositories.
+AIVE is a small, GitHub-first prototype with a big thesis: as coding agents get stronger, "finding bugs" stops being the hard part. The hard part becomes *proving a bug is real, estimating how far it can spread, drafting safe patches, verifying them, and shipping the fix* — all without letting an autonomous system quietly break production while you were at lunch.
 
-The bet is simple: as coding agents get stronger, the bottleneck shifts from "finding bugs" to proving they are real, estimating blast radius, generating safe patches, running regression checks, and shipping fixes without letting autonomous systems quietly break production.
+The threat model is shifting too. The red team of the future isn't one human filing a bug report; it's offensive automation roaming the internet, chaining weaknesses at machine speed. If that becomes normal, the blue team needs the same reach: systems that can investigate, reproduce, patch, verify, and harden code *before* hostile agents show up. AIVE is a minimal skeleton for that blue-team loop — think of it as a tiny, opinionated CVE pipeline you can run on your own repo before breakfast.
 
-The threat model is also changing. Rogue AI systems will eventually be able to move autonomously across the internet, probe targets, chain weaknesses, and exploit software faster than human teams can respond. If that becomes normal, defenders need the same level of autonomous reach on the blue-team side: systems that can investigate, reproduce, patch, verify, and harden code before hostile agents arrive.
+> **TL;DR** — point it at a repo, it flags risky patterns, drafts an exploit-to-patch plan for each one, and runs verification checks. No servers, no accounts, no telemetry. Just Python and good intentions.
 
-This repo is a minimal GitHub-first prototype for that idea.
+---
 
-## Why AIVE
+## The core loop
 
-- Keep original human code on GitHub as the source of truth.
-- Let AI operate inside a constrained maintenance lane.
-- Treat exploit discovery as the start of a patch pipeline, not the final output.
-- Require cross-checking, verification, and comparable patch options before merge.
-- Build an autonomous blue-team loop that can keep pace with autonomous attackers.
+1. **Scan** a repository for high-risk patterns.
+2. **Validate** whether the issue actually looks exploitable (not just "the regex matched").
+3. **Estimate blast radius** — localized, moderate, or broad.
+4. **Draft multiple safe patch options** per finding.
+5. **Verify** — syntax, test presence, workflow hygiene.
+6. **Hand off** to GitHub for review, PRs, and independent verifier agents.
 
-## Core Loop
+`main` stays human-owned and reviewable. AI runs in a constrained maintenance lane. One agent proposes; separate verifier agents reproduce and cross-check; only validated fixes with passing checks get promoted toward merge.
 
-1. Scan a repository for high-risk patterns.
-2. Validate whether the issue looks exploitable.
-3. Estimate blast radius.
-4. Draft multiple safe patch options.
-5. Run lightweight regression and workflow checks.
-6. Hand off the result to GitHub for review, PRs, and verifier agents.
+---
 
-## What This Prototype Includes
+## What's in the box
 
-- A lightweight scanner for dangerous code patterns.
-- Patch-plan generation built around exploit-to-patch framing.
-- Verification checks for syntax, test presence, and workflow hygiene.
-- A GitHub Actions dry-run workflow that can be scheduled or triggered manually.
+- **A pattern scanner** with 8 rules covering the classics — dynamic `eval`/`exec`, shelling out with `shell=True`, raw `os.system`, unsafe `pickle`/`yaml.load`, hard-coded credentials, disabled TLS verification, and weak hashing.
+- **Confidence + severity + blast-radius scoring** on every finding, sorted worst-first.
+- **Inline suppression** — annotate a reviewed false positive with `# aive: ignore` and the loop stops re-flagging it. (The scanner even passes a clean scan of itself this way.)
+- **Patch-plan generation** — each finding comes with a rule-specific remediation plus a standard "reproduce first, ship behind a branch, verify independently" gate.
+- **Verification checks** — Python syntax, test-coverage signal, workflow presence, repo hygiene.
+- **CI gating** — `--fail-on high` turns the scan into a merge blocker; `--min-confidence` tunes the noise floor.
+- **A GitHub Actions dry-run** you can schedule or trigger by hand.
 
-## Repo Layout
+Zero third-party runtime dependencies. The whole thing is the standard library and a clear conscience.
+
+---
+
+## Quick start (beginner-friendly, nothing assumed)
+
+**Prerequisites:** Python 3.11 or newer. Check with:
+
+```bash
+python3 --version
+```
+
+**1. Clone it:**
+
+```bash
+git clone https://github.com/waleedsworld/aive-protocol.git
+cd aive-protocol
+```
+
+**2. Make a cozy little virtual environment** (keeps your global Python tidy):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+```
+
+**3. Install it** (editable, so you can hack on the rules):
+
+```bash
+pip install -e .
+```
+
+That's it — you now have an `aive` command on your PATH. Kick the tires:
+
+```bash
+aive --version
+```
+
+---
+
+## Using it
+
+AIVE ships one friendly command with three subcommands. Point it at any repo.
+
+**Scan a repo and print JSON findings:**
+
+```bash
+aive scan .
+```
+
+**Save findings, then turn them into a patch plan:**
+
+```bash
+aive scan . --output artifacts/findings.json
+aive plan artifacts/findings.json --output artifacts/patch-plan.md
+```
+
+**Run the verification checks:**
+
+```bash
+aive verify . --strict
+```
+
+**Gate a pull request in CI** (exit non-zero if anything high-severity shows up):
+
+```bash
+aive scan . --fail-on high
+```
+
+**Turn down the noise** with a confidence floor:
+
+```bash
+aive scan . --min-confidence 0.8
+```
+
+> Prefer plain scripts? The originals still live in `scripts/` (`scan_repo.py`, `patch_plan.py`, `verify_repo.py`) — that's what the CI workflow calls, so it needs no install step.
+
+### Suppressing a reviewed false positive
+
+Sometimes a pattern is intentional (a rule definition, a test fixture, a checksum that isn't security-sensitive). Tag the line and AIVE will leave it be:
+
+```python
+digest = hashlib.md5(payload)  # aive: ignore  (checksum only, not a security control)
+```
+
+---
+
+## What the output looks like
+
+A scan payload is compact, sorted worst-first, and machine-friendly:
+
+```json
+{
+  "schema": "aive.scan.v1",
+  "repo": "demo",
+  "finding_count": 3,
+  "severity_summary": { "high": 2, "medium": 0, "low": 1 },
+  "findings": [
+    {
+      "rule_id": "AIVE-PY-003",
+      "title": "Direct OS command execution",
+      "file_path": "deploy.py",
+      "line": 7,
+      "severity": "high",
+      "confidence": 0.83,
+      "blast_radius": "localized",
+      "exploit_hypothesis": "a raw OS command call can be steered by unsanitised input"
+    }
+  ]
+}
+```
+
+Feed that into `aive plan` and every finding gets a decision frame, a rule-specific fix, and a merge gate. A full rendered example lives in **[docs/sample-patch-plan.md](docs/sample-patch-plan.md)**.
+
+---
+
+## The rule set
+
+| Rule ID | Severity | What it catches |
+| --- | --- | --- |
+| `AIVE-PY-001` | high | Dynamic code execution (`eval` / `exec`) |
+| `AIVE-PY-002` | high | Shell execution with `shell=True` interpolation |
+| `AIVE-PY-003` | high | Direct OS command execution (`os.system` / `os.popen`) |
+| `AIVE-PY-004` | high | Unsafe deserialization (`pickle.loads`) |
+| `AIVE-PY-005` | medium | `yaml.load` without a safe loader |
+| `AIVE-SEC-001` | medium | Hard-coded credential markers |
+| `AIVE-SEC-002` | medium | TLS verification disabled (`verify=False`) |
+| `AIVE-SEC-003` | low | Weak hashing primitives (`md5` / `sha1`) |
+
+Adding a rule is a two-line affair: drop a pattern into `RULES` in `aive/engine.py` and a preferred fix into `SPECIFIC_PATCH_OPTIONS`. They sit right next to each other on purpose.
+
+---
+
+## Repo layout
 
 ```text
 .
-├── .github/workflows/aive-dry-run.yml
+├── .github/workflows/aive-dry-run.yml   # scheduled/manual dry-run in CI
 ├── aive/
 │   ├── __init__.py
-│   ├── engine.py
-│   └── models.py
+│   ├── cli.py        # the `aive` command (scan / plan / verify)
+│   ├── engine.py     # rules, scanning, patch planning, verification
+│   └── models.py     # Finding / PatchOption / VerificationCheck dataclasses
+├── docs/
+│   └── sample-patch-plan.md
 ├── examples/
-│   └── aive-2026-0001.json
-├── scripts/
-│   ├── patch_plan.py
-│   ├── scan_repo.py
-│   └── verify_repo.py
-├── .gitignore
+│   └── aive-2026-0001.json   # what a finished advisory record looks like
+├── scripts/          # standalone entry points (used by CI)
+├── tests/
 ├── LICENSE
 ├── pyproject.toml
 └── README.md
 ```
 
-## Quick Start
+---
+
+## Running the tests
+
+No extra dependencies required — it's all `unittest`:
 
 ```bash
-python3 scripts/scan_repo.py . --output artifacts/findings.json
-python3 scripts/patch_plan.py artifacts/findings.json --output artifacts/patch-plan.md
-python3 scripts/verify_repo.py . --json
+python -m unittest discover -s tests
 ```
 
-## GitHub Operating Model
+(Or `pip install -e ".[dev]"` and `pytest` if that's your jam.)
 
-The intended production shape is:
+---
 
-- `main` stays human-owned and reviewable.
-- AI runs in a sandbox branch or temporary environment.
-- one agent proposes patches.
-- separate verifier agents reproduce, compare, and cross-check those patches.
-- only validated fixes with passing checks are promoted toward merge.
+## Advisory records
 
-This repo does not claim to solve autonomous code safety end to end. It gives the project a concrete identity, terminology, and a minimal implementation skeleton that can grow into a full GitHub-native patching protocol.
+Findings that survive triage become **AIVE records** — reproduced, scoped, and paired with at least one safe patch path. Suggested naming: `AIVE-2026-0001`, `AIVE-2026-0002`, … See [examples/aive-2026-0001.json](examples/aive-2026-0001.json) for the shape.
 
-## Threat Model
-
-The red-team future is not a single human researcher filing a bug report. It is autonomous offensive systems roaming the internet, testing code paths, escalating access, and exploiting weak software supply chains at machine speed.
-
-AIVE is built around the defensive answer to that future:
-
-- blue-team agents that can autonomously inspect repositories and infrastructure boundaries
-- exploit validation before panic or false-positive patching
-- patch generation with multiple candidate fixes
-- independent verifier agents that reproduce and cross-check the result
-- continuous operation so the defense loop never goes idle
-
-The goal is not merely to find vulnerabilities. The goal is to keep secure systems ahead of hostile automation.
-
-## Example AIVE Record
-
-Example advisory payload: [examples/aive-2026-0001.json](examples/aive-2026-0001.json)
-
-Suggested naming format:
-
-- `AIVE-2026-0001`
-- `AIVE-2026-0002`
-
-Each record should represent an issue that has been reproduced, scoped, and paired with at least one safe patch path.
+---
 
 ## Roadmap
 
 - GitHub App mode for PR orchestration.
-- sandbox execution for AI-generated patches.
-- multi-agent verifier quorum before merge.
-- regression replay against historical failures.
-- blast-radius scoring tied to dependency and ownership graphs.
+- Sandbox execution for AI-generated patches.
+- Multi-agent verifier quorum before merge.
+- Regression replay against historical failures.
+- Blast-radius scoring tied to dependency and ownership graphs.
+- Language coverage beyond Python (the scanner already reads JS/TS/shell/YAML files).
+
+---
 
 ## Positioning
 
-This is not "AI bug-finding."
+This is **not** "AI bug-finding." It's exploit-to-patch infrastructure for the moment when humans can no longer line-by-line review large volumes of agent-generated code but still need software that compiles, behaves, and ships safely.
 
-It is exploit-to-patch infrastructure for the moment when humans can no longer line-by-line review large volumes of agent-generated code, but still need software that compiles, behaves, and ships safely.
+The north star is simple: keep it running for as long as software exists, continuously nudging systems toward a safer state — before red-team automation gets there first.
 
-In practical terms, that means building autonomous blue-team operations that can move across codebases and internet-facing systems, secure them, verify them, and keep running indefinitely. The north star for AIVE is simple: keep it running for as long as software exists, continuously pushing systems toward a safer state before red-team automation gets there first.
+## License
+
+MIT — see [LICENSE](LICENSE).
